@@ -3,6 +3,11 @@ Aplikasi Streamlit: Klasifikasi Anomali dan Serangan Jaringan (UNSW-NB15) dengan
 Proyek 01, Machine Learning for Network Data, D4 TRKJ Universitas Bung Hatta
 
 Jalankan lokal:  streamlit run app.py
+
+PERUBAHAN DARI TEMPLATE:
+1. Identitas mahasiswa (nama, NIM) di sidebar dan footer.
+2. Tab baru "Uji threshold": tabel dan grafik recall, precision, dan alarm palsu
+   pada beberapa nilai threshold, dihitung dari data contoh.
 """
 import json
 from pathlib import Path
@@ -10,6 +15,11 @@ from pathlib import Path
 import joblib
 import pandas as pd
 import streamlit as st
+
+# ====== ISI IDENTITAS KAMU DI SINI ======
+NAMA = "Aulia Siddik Pulungan"
+NIM = "2410017514009"
+# ========================================
 
 BASE = Path(__file__).parent
 MODEL_DIR = BASE / "model"
@@ -65,13 +75,18 @@ with st.sidebar:
     c1.metric("Recall serangan", f"{mb['recall']:.1%}")
     c2.metric("Akurasi kategori", f"{mc['accuracy']:.1%}")
     st.caption(f"Dataset: {meta['dataset']}")
+    st.divider()
+    st.caption(f"**{NAMA}** | NIM {NIM}")
+    st.caption("D4 TRKJ, Universitas Bung Hatta")
 
 # ---------- Halaman utama ----------
 st.title("🛡️ Deteksi Anomali dan Serangan Jaringan")
 st.write("Model **Random Forest** yang dilatih pada dataset **UNSW-NB15** memprediksi apakah sebuah "
          "flow jaringan normal atau serangan, sekaligus menebak kategori serangannya.")
 
-tab_csv, tab_manual, tab_info = st.tabs(["📄 Prediksi dari CSV", "✍️ Input manual", "ℹ️ Tentang model"])
+tab_csv, tab_manual, tab_thr, tab_info = st.tabs(
+    ["📄 Prediksi dari CSV", "✍️ Input manual", "📊 Uji threshold", "ℹ️ Tentang model"]
+)
 
 # --- Tab 1: CSV ---
 with tab_csv:
@@ -147,7 +162,46 @@ with tab_manual:
         else:
             st.success(f"**Normal** (probabilitas serangan {r['prob_serangan']:.1%})")
 
-# --- Tab 3: Info model ---
+# --- Tab 3: Uji threshold (PERUBAHAN BARU) ---
+with tab_thr:
+    st.subheader("Pengaruh threshold terhadap hasil deteksi")
+    st.write("Tab ini menghitung recall, precision, dan jumlah alarm palsu pada beberapa nilai threshold "
+             "menggunakan 300 flow contoh yang punya label asli. Semakin rendah threshold, semakin banyak "
+             "serangan tertangkap (recall naik), tetapi alarm palsu juga bertambah.")
+
+    sample = pd.read_csv(SAMPLE_CSV)
+    prob = predict(sample, 0.5)["prob_serangan"]
+
+    if "label" in sample.columns:
+        y = sample["label"].astype(int)
+        rows = []
+        for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+            pred = (prob >= t).astype(int)
+            tp = int(((pred == 1) & (y == 1)).sum())
+            fp = int(((pred == 1) & (y == 0)).sum())
+            fn = int(((pred == 0) & (y == 1)).sum())
+            rows.append({
+                "threshold": t,
+                "serangan terdeteksi": int(pred.sum()),
+                "recall": round(tp / (tp + fn), 3) if (tp + fn) else 0.0,
+                "precision": round(tp / (tp + fp), 3) if (tp + fp) else 0.0,
+                "alarm palsu": fp,
+            })
+        thr_df = pd.DataFrame(rows)
+
+        sel = thr_df.iloc[(thr_df["threshold"] - threshold).abs().argmin()]
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Recall @ {sel['threshold']:.1f}", f"{sel['recall']:.1%}")
+        m2.metric(f"Precision @ {sel['threshold']:.1f}", f"{sel['precision']:.1%}")
+        m3.metric(f"Alarm palsu @ {sel['threshold']:.1f}", int(sel["alarm palsu"]))
+
+        st.dataframe(thr_df, width="stretch", hide_index=True)
+        st.line_chart(thr_df, x="threshold", y=["recall", "precision"])
+        st.bar_chart(thr_df, x="threshold", y="alarm palsu")
+    else:
+        st.warning("Data contoh tidak memiliki kolom `label`, sehingga recall dan precision tidak bisa dihitung.")
+
+# --- Tab 4: Info model ---
 with tab_info:
     st.subheader("Fitur terpenting (model biner)")
     imp = pd.Series(meta["importance_top15"]).rename_axis("fitur").reset_index(name="importance")
@@ -161,3 +215,6 @@ with tab_info:
     }))
     st.caption(f"Dilatih dengan Python {meta['versions']['python']}, "
                f"scikit-learn {meta['versions']['scikit-learn']}, numpy {meta['versions']['numpy']}.")
+
+st.divider()
+st.caption(f"Dibuat oleh {NAMA} (NIM {NIM}) | Proyek 01 Random Forest UNSW-NB15 | D4 TRKJ Universitas Bung Hatta")
